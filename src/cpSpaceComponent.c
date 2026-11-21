@@ -42,34 +42,50 @@ cpSpaceActivateBody(cpSpace *space, cpBody *body)
 			cpSpatialIndexInsert(space->dynamicShapes, shape, shape->hashid);
 		}
 		
-		CP_BODY_FOREACH_ARBITER(body, arb){
+		// Iterate manually: cpArbiterUnthread() below clears the very thread
+		// pointer that CP_BODY_FOREACH_ARBITER uses to find the next node.
+		cpArbiter *arb = body->arbiterList;
+		while(arb){
+			cpArbiter *next = cpArbiterNext(arb, body);
 			cpBody *bodyA = arb->body_a;
-			
+
 			// Arbiters are shared between two bodies that are always woken up together.
 			// You only want to restore the arbiter once, so bodyA is arbitrarily chosen to own the arbiter.
 			// The edge case is when static bodies are involved as the static bodies never actually sleep.
 			// If the static body is bodyB then all is good. If the static body is bodyA, that can easily be checked.
 			if(body == bodyA || cpBodyGetType(bodyA) == CP_BODY_TYPE_STATIC){
+				// A body queued in space->rousedBodies was activated from inside
+				// a locked section (e.g. a collision callback). Sleeping bodies
+				// keep their arbiters threaded, so the flush below would push
+				// those arbiters back onto the contact graph while they are still
+				// linked (cpBodyPushArbiter() asserts on non-NULL thread pointers).
+				// Unthreading first is the same cleanup cpSpaceStep() performs for
+				// awake bodies at the start of every step and makes the restore
+				// idempotent if the arbiter is already cached or queued.
+				cpArbiterUnthread(arb);
+
 				int numContacts = arb->count;
 				struct cpContact *contacts = arb->contacts;
-				
+
 				// Restore contact values back to the space's contact buffer memory
 				arb->contacts = cpContactBufferGetArray(space);
 				memcpy(arb->contacts, contacts, numContacts*sizeof(struct cpContact));
 				cpSpacePushContacts(space, numContacts);
-				
-				// Reinsert the arbiter into the arbiter cache
+
+				// Reinsert the arbiter into the arbiter cache (idempotent).
 				const cpShape *a = arb->a, *b = arb->b;
 				const cpShape *shape_pair[] = {a, b};
 				cpHashValue arbHashID = CP_HASH_PAIR((cpHashValue)a, (cpHashValue)b);
 				cpHashSetInsert(space->cachedArbiters, arbHashID, shape_pair, NULL, arb);
-				
+
 				// Update the arbiter's state
 				arb->stamp = space->stamp;
-				cpArrayPush(space->arbiters, arb);
-				
+				if(!cpArrayContains(space->arbiters, arb)) cpArrayPush(space->arbiters, arb);
+
 				cpfree(contacts);
 			}
+
+			arb = next;
 		}
 		
 		CP_BODY_FOREACH_CONSTRAINT(body, constraint){
