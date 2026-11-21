@@ -20,6 +20,18 @@
  */
 
 /// @defgroup cpDampedRotarySpring cpDampedRotarySpring
+///
+/// Impulse reporting semantics: cpConstraintGetImpulse() on a damped rotary
+/// spring returns the total angular impulse J applied by the constraint during
+/// the most recent cpSpaceStep(), including BOTH the spring torque term and the
+/// damping term. The sign convention is the impulse applied to body b (with -J
+/// applied to body a), the same convention used by cpDampedSpring:
+///
+///   J = springTorqueFunc(relativeAngle)*dt - (sum of damping impulses)
+///
+/// A verifiable identity: when no other torques act on the bodies,
+///   J == b->i*(w_b_after - w_b_before) == -a->i*(w_a_after - w_a_before)
+/// over a single step.
 /// @{
 
 /// Check if a constraint is a damped rotary springs.
