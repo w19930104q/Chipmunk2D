@@ -19,6 +19,8 @@
  * SOFTWARE.
  */
 
+#include <limits.h>
+
 #include "chipmunk/chipmunk_private.h"
 #include "prime.h"
 
@@ -231,11 +233,57 @@ hash_func(cpHashValue x, cpHashValue y, cpHashValue n)
 
 // Much faster than (int)floor(f)
 // Profiling showed floor() to be a sizable performance hog
+// Note: Saturates to the int range instead of invoking undefined behavior
+// when f is NaN, infinite, or simply too large to fit in an int. Such values
+// occur when a body's position becomes non-finite or astronomically large
+// (e.g. after a physics explosion) and must not turn the cell loops below
+// into unbounded loops. The BB tree broadphase tolerates any cpBB value;
+// the spatial hash must not hang on them either.
 static inline int
 floor_int(cpFloat f)
 {
+	if(!(f > -(cpFloat)INT_MAX)) return -INT_MAX; // NaN, -inf, or underflow
+	if(!(f < (cpFloat)INT_MAX)) return INT_MAX; // +inf or overflow
+
 	int i = (int)f;
 	return (f < 0.0f && f != i ? i - 1 : i);
+}
+
+// Compute the cell coordinate range covered by a bb.
+// Returns cpTrue if the range spans more cells than the table has slots.
+// In that case iterating the exact range would take effectively forever
+// (or overflow the loop counters), so the caller must visit every table
+// slot instead. That is a strict superset of the exact cell set, and any
+// false positives it introduces are removed by the exact bounding box and
+// narrowphase checks performed downstream of every query, so query results
+// are unchanged.
+static inline cpBool
+cell_range_overflows(cpBB bb, cpFloat dim, int numcells, int *l, int *r, int *b, int *t)
+{
+	(*l) = floor_int(bb.l/dim);
+	(*r) = floor_int(bb.r/dim);
+	(*b) = floor_int(bb.b/dim);
+	(*t) = floor_int(bb.t/dim);
+
+	// Use 64 bit math: the saturated bounds can be up to 2^32 apart.
+	return ((int64_t)(*r) - (int64_t)(*l) >= (int64_t)numcells ||
+	        (int64_t)(*t) - (int64_t)(*b) >= (int64_t)numcells);
+}
+
+static inline void
+hashHandleIntoCell(cpSpaceHash *hash, cpHandle *hand, cpHashValue idx)
+{
+	cpSpaceHashBin *bin = hash->table[idx];
+
+	// Don't add an object twice to the same cell.
+	if(containsHandle(bin, hand)) return;
+
+	cpHandleRetain(hand);
+	// Insert a new bin for the handle in this cell.
+	cpSpaceHashBin *newBin = getEmptyBin(hash);
+	newBin->handle = hand;
+	newBin->next = bin;
+	hash->table[idx] = newBin;
 }
 
 static inline void
@@ -243,26 +291,22 @@ hashHandle(cpSpaceHash *hash, cpHandle *hand, cpBB bb)
 {
 	// Find the dimensions in cell coordinates.
 	cpFloat dim = hash->celldim;
-	int l = floor_int(bb.l/dim); // Fix by ShiftZ
-	int r = floor_int(bb.r/dim);
-	int b = floor_int(bb.b/dim);
-	int t = floor_int(bb.t/dim);
-	
+	int l, r, b, t;
 	int n = hash->numcells;
-	for(int i=l; i<=r; i++){
-		for(int j=b; j<=t; j++){
-			cpHashValue idx = hash_func(i,j,n);
-			cpSpaceHashBin *bin = hash->table[idx];
-			
-			// Don't add an object twice to the same cell.
-			if(containsHandle(bin, hand)) continue;
 
-			cpHandleRetain(hand);
-			// Insert a new bin for the handle in this cell.
-			cpSpaceHashBin *newBin = getEmptyBin(hash);
-			newBin->handle = hand;
-			newBin->next = bin;
-			hash->table[idx] = newBin;
+	if(cell_range_overflows(bb, dim, n, &l, &r, &b, &t)){
+		// The bb spans more cells than the table has slots (degenerate or
+		// astronomically large bb). Insert into every slot instead of
+		// looping (nearly) forever. See cell_range_overflows().
+		for(int idx=0; idx<n; idx++) hashHandleIntoCell(hash, hand, (cpHashValue)idx);
+		return;
+	}
+
+	// Use 64 bit loop counters so that saturated cell coordinates near
+	// INT_MAX cannot overflow the loop variable and wrap around forever.
+	for(int64_t i=l; i<=r; i++){
+		for(int64_t j=b; j<=t; j++){
+			hashHandleIntoCell(hash, hand, hash_func((cpHashValue)i, (cpHashValue)j, (cpHashValue)n));
 		}
 	}
 }
@@ -378,21 +422,26 @@ cpSpaceHashQuery(cpSpaceHash *hash, void *obj, cpBB bb, cpSpatialIndexQueryFunc 
 {
 	// Get the dimensions in cell coordinates.
 	cpFloat dim = hash->celldim;
-	int l = floor_int(bb.l/dim);  // Fix by ShiftZ
-	int r = floor_int(bb.r/dim);
-	int b = floor_int(bb.b/dim);
-	int t = floor_int(bb.t/dim);
-	
+	int l, r, b, t;
 	int n = hash->numcells;
 	cpSpaceHashBin **table = hash->table;
-	
-	// Iterate over the cells and query them.
-	for(int i=l; i<=r; i++){
-		for(int j=b; j<=t; j++){
-			query_helper(hash, &table[hash_func(i,j,n)], obj, func, data);
+
+	if(cell_range_overflows(bb, dim, n, &l, &r, &b, &t)){
+		// Degenerate or astronomically large query bb: query every slot
+		// instead of looping (nearly) forever. See cell_range_overflows().
+		for(int idx=0; idx<n; idx++){
+			query_helper(hash, &table[idx], obj, func, data);
+		}
+	} else {
+		// Iterate over the cells and query them.
+		// 64 bit loop counters cannot overflow and wrap around forever.
+		for(int64_t i=l; i<=r; i++){
+			for(int64_t j=b; j<=t; j++){
+				query_helper(hash, &table[hash_func((cpHashValue)i, (cpHashValue)j, (cpHashValue)n)], obj, func, data);
+			}
 		}
 	}
-	
+
 	hash->stamp++;
 }
 
@@ -417,30 +466,46 @@ queryRehash_helper(cpHandle *hand, queryRehashContext *context)
 	void *obj = hand->obj;
 	cpBB bb = hash->spatialIndex.bbfunc(obj);
 
-	int l = floor_int(bb.l/dim);
-	int r = floor_int(bb.r/dim);
-	int b = floor_int(bb.b/dim);
-	int t = floor_int(bb.t/dim);
-	
+	int l, r, b, t;
 	cpSpaceHashBin **table = hash->table;
 
-	for(int i=l; i<=r; i++){
-		for(int j=b; j<=t; j++){
-			cpHashValue idx = hash_func(i,j,n);
+	if(cell_range_overflows(bb, dim, n, &l, &r, &b, &t)){
+		// Degenerate or astronomically large bb: rehash into and query
+		// every slot instead of looping (nearly) forever.
+		// See cell_range_overflows().
+		for(int idx=0; idx<n; idx++){
 			cpSpaceHashBin *bin = table[idx];
-			
+
 			if(containsHandle(bin, hand)) continue;
-			
+
 			cpHandleRetain(hand); // this MUST be done first in case the object is removed in func()
 			query_helper(hash, &bin, obj, func, data);
-			
+
 			cpSpaceHashBin *newBin = getEmptyBin(hash);
 			newBin->handle = hand;
 			newBin->next = bin;
 			table[idx] = newBin;
 		}
+	} else {
+		// 64 bit loop counters cannot overflow and wrap around forever.
+		for(int64_t i=l; i<=r; i++){
+			for(int64_t j=b; j<=t; j++){
+				cpHashValue idx = hash_func((cpHashValue)i, (cpHashValue)j, (cpHashValue)n);
+				cpSpaceHashBin *bin = table[idx];
+
+				if(containsHandle(bin, hand)) continue;
+
+				cpHandleRetain(hand); // this MUST be done first in case the object is removed in func()
+				query_helper(hash, &bin, obj, func, data);
+
+				cpSpaceHashBin *newBin = getEmptyBin(hash);
+				newBin->handle = hand;
+				newBin->next = bin;
+				table[idx] = newBin;
+			}
+		}
 	}
-	
+
 	// Increment the stamp for each object hashed.
 	hash->stamp++;
 }
@@ -553,9 +618,15 @@ cpSpaceHashResize(cpSpaceHash *hash, cpFloat celldim, int numcells)
 	}
 	
 	clearTable(hash);
-	
+
 	hash->celldim = celldim;
 	cpSpaceHashAllocTable(hash, next_prime(numcells));
+
+	// The table was emptied above, leaving the handles without any bins.
+	// Rehash immediately so the index stays consistent. Without this, shapes
+	// (especially static ones, which are never rehashed by cpSpaceStep())
+	// would silently disappear from query results until a manual rehash.
+	cpSpaceHashRehash(hash);
 }
 
 static int
