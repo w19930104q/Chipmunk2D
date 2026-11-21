@@ -162,6 +162,11 @@ void cpLoopIndexes(const cpVect *verts, int count, int *start, int *end);
 
 void cpConstraintInit(cpConstraint *constraint, const struct cpConstraintClass *klass, cpBody *a, cpBody *b);
 
+// Zero any cached (warm starting) impulse the constraint has accumulated.
+// Called when the type of one of the constraint's bodies changes so the
+// solver reinitializes the constraint for the new body types.
+void cpConstraintResetCachedImpulse(cpConstraint *constraint);
+
 static inline void
 cpConstraintActivateBodies(cpConstraint *constraint)
 {
@@ -216,12 +221,23 @@ k_scalar_body(cpBody *body, cpVect r, cpVect n)
 	return body->m_inv + body->i_inv*rcn*rcn;
 }
 
+// Constraints and contacts can only be solved if at least one of the bodies is dynamic.
+// A zero effective mass simply means the constraint connects two non-dynamic bodies
+// and cannot affect them. This is not an error: bodies may change type at runtime,
+// so such constraints must be harmless no-ops until a body becomes dynamic again.
+static inline cpBool
+cpConstraintCheckSolvable(cpBody *a, cpBody *b, cpBool condition)
+{
+	cpAssertSoft(condition || (cpBodyGetType(a) != CP_BODY_TYPE_DYNAMIC && cpBodyGetType(b) != CP_BODY_TYPE_DYNAMIC), "Unsolvable collision or constraint.");
+	return condition;
+}
+
 static inline cpFloat
 k_scalar(cpBody *a, cpBody *b, cpVect r1, cpVect r2, cpVect n)
 {
 	cpFloat value = k_scalar_body(a, r1, n) + k_scalar_body(b, r2, n);
-	cpAssertSoft(value != 0.0, "Unsolvable collision or constraint.");
-	
+	cpConstraintCheckSolvable(a, b, value != 0.0);
+
 	return value;
 }
 
@@ -252,9 +268,11 @@ k_tensor(cpBody *a, cpBody *b, cpVect r1, cpVect r2)
 	
 	// invert
 	cpFloat det = k11*k22 - k12*k21;
-	cpAssertSoft(det != 0.0, "Unsolvable constraint.");
-	
-	cpFloat det_inv = 1.0f/det;
+	cpConstraintCheckSolvable(a, b, det != 0.0);
+
+	// A zero determinant means the constraint cannot affect the bodies (both are non-dynamic).
+	// Return a zeroed mass tensor so the constraint becomes a no-op instead of producing NaNs.
+	cpFloat det_inv = (det != 0.0f ? 1.0f/det : 0.0f);
 	return cpMat2x2New(
 		 k22*det_inv, -k12*det_inv,
 		-k21*det_inv,  k11*det_inv

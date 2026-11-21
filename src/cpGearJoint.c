@@ -28,7 +28,8 @@ preStep(cpGearJoint *joint, cpFloat dt)
 	cpBody *b = joint->constraint.b;
 	
 	// calculate moment of inertia coefficient.
-	joint->iSum = 1.0f/(a->i_inv*joint->ratio_inv + joint->ratio*b->i_inv);
+	cpFloat iSum = a->i_inv*joint->ratio_inv + joint->ratio*b->i_inv;
+	joint->iSum = (iSum != 0.0f ? 1.0f/iSum : 0.0f);
 	
 	// calculate bias velocity
 	cpFloat maxBias = joint->constraint.maxBias;
@@ -74,11 +75,18 @@ getImpulse(cpGearJoint *joint)
 	return cpfabs(joint->jAcc);
 }
 
+static void
+resetCachedImpulse(cpGearJoint *joint)
+{
+	joint->jAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpGearJoint *

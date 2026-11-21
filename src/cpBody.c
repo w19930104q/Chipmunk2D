@@ -158,14 +158,29 @@ cpBodySetType(cpBody *body, cpBodyType type)
 	if(type == CP_BODY_TYPE_DYNAMIC){
 		body->m = body->i = 0.0f;
 		body->m_inv = body->i_inv = INFINITY;
-		
+
 		cpBodyAccumulateMassFromShapes(body);
 	} else {
 		body->m = body->i = INFINITY;
 		body->m_inv = body->i_inv = 0.0f;
-		
-		body->v = cpvzero;
-		body->w = 0.0f;
+	}
+
+	// Reset any leftover dynamic state so it cannot leak into the new type.
+	// The velocities, accumulated forces and bias velocities of non-dynamic bodies
+	// are never integrated or cleared by the solver, and a body that becomes
+	// dynamic must not be kicked by its own history.
+	body->v = cpvzero;
+	body->w = 0.0f;
+	body->f = cpvzero;
+	body->t = 0.0f;
+	body->v_bias = cpvzero;
+	body->w_bias = 0.0f;
+
+	// Cached constraint impulses are only meaningful for the body types they were
+	// accumulated with. Reset them so the solver reinitializes the constraints
+	// from scratch instead of applying a stale historical impulse.
+	CP_BODY_FOREACH_CONSTRAINT(body, constraint){
+		cpConstraintResetCachedImpulse(constraint);
 	}
 	
 	// If the body is added to a space already, we'll need to update some space data structures.

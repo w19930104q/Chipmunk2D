@@ -75,11 +75,18 @@ getImpulse(cpConstraint *joint)
 	return cpvlength(((cpPivotJoint *)joint)->jAcc);
 }
 
+static void
+resetCachedImpulse(cpPivotJoint *joint)
+{
+	joint->jAcc = cpvzero;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpPivotJoint *

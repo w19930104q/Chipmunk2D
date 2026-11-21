@@ -28,7 +28,8 @@ preStep(cpSimpleMotor *joint, cpFloat dt)
 	cpBody *b = joint->constraint.b;
 	
 	// calculate moment of inertia coefficient.
-	joint->iSum = 1.0f/(a->i_inv + b->i_inv);
+	cpFloat iSum = a->i_inv + b->i_inv;
+	joint->iSum = (iSum != 0.0f ? 1.0f/iSum : 0.0f);
 }
 
 static void
@@ -70,11 +71,18 @@ getImpulse(cpSimpleMotor *joint)
 	return cpfabs(joint->jAcc);
 }
 
+static void
+resetCachedImpulse(cpSimpleMotor *joint)
+{
+	joint->jAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpSimpleMotor *

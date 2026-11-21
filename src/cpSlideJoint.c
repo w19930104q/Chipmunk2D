@@ -45,7 +45,8 @@ preStep(cpSlideJoint *joint, cpFloat dt)
 	}
 	
 	// calculate mass normal
-	joint->nMass = 1.0f/k_scalar(a, b, joint->r1, joint->r2, joint->n);
+	cpFloat k = k_scalar(a, b, joint->r1, joint->r2, joint->n);
+	joint->nMass = (k != 0.0f ? 1.0f/k : 0.0f);
 	
 	// calculate bias velocity
 	cpFloat maxBias = joint->constraint.maxBias;
@@ -94,11 +95,18 @@ getImpulse(cpConstraint *joint)
 	return cpfabs(((cpSlideJoint *)joint)->jnAcc);
 }
 
+static void
+resetCachedImpulse(cpSlideJoint *joint)
+{
+	joint->jnAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpSlideJoint *

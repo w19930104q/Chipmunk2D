@@ -103,11 +103,18 @@ getImpulse(cpGrooveJoint *joint)
 	return cpvlength(joint->jAcc);
 }
 
+static void
+resetCachedImpulse(cpGrooveJoint *joint)
+{
+	joint->jAcc = cpvzero;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpGrooveJoint *

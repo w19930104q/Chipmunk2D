@@ -56,6 +56,13 @@ cpConstraintInit(cpConstraint *constraint, const cpConstraintClass *klass, cpBod
 	constraint->postSolve = NULL;
 }
 
+void
+cpConstraintResetCachedImpulse(cpConstraint *constraint)
+{
+	cpConstraintResetCachedImpulseImpl impl = constraint->klass->resetCachedImpulse;
+	if(impl) impl(constraint);
+}
+
 cpSpace *
 cpConstraintGetSpace(const cpConstraint *constraint)
 {

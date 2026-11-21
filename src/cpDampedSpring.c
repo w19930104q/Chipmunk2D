@@ -40,8 +40,7 @@ preStep(cpDampedSpring *spring, cpFloat dt)
 	spring->n = cpvmult(delta, 1.0f/(dist ? dist : INFINITY));
 	
 	cpFloat k = k_scalar(a, b, spring->r1, spring->r2, spring->n);
-	cpAssertSoft(k != 0.0, "Unsolvable spring.");
-	spring->nMass = 1.0f/k;
+	spring->nMass = (k != 0.0f ? 1.0f/k : 0.0f);
 	
 	spring->target_vrn = 0.0f;
 	spring->v_coef = 1.0f - cpfexp(-spring->damping*dt*k);
@@ -82,11 +81,18 @@ getImpulse(cpDampedSpring *spring)
 	return spring->jAcc;
 }
 
+static void
+resetCachedImpulse(cpDampedSpring *spring)
+{
+	spring->jAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpDampedSpring *

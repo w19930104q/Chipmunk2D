@@ -36,7 +36,8 @@ preStep(cpRotaryLimitJoint *joint, cpFloat dt)
 	}
 	
 	// calculate moment of inertia coefficient.
-	joint->iSum = 1.0f/(a->i_inv + b->i_inv);
+	cpFloat iSum = a->i_inv + b->i_inv;
+	joint->iSum = (iSum != 0.0f ? 1.0f/iSum : 0.0f);
 	
 	// calculate bias velocity
 	cpFloat maxBias = joint->constraint.maxBias;
@@ -91,11 +92,18 @@ getImpulse(cpRotaryLimitJoint *joint)
 	return cpfabs(joint->jAcc);
 }
 
+static void
+resetCachedImpulse(cpRotaryLimitJoint *joint)
+{
+	joint->jAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpRotaryLimitJoint *

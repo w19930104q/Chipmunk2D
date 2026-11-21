@@ -33,8 +33,8 @@ preStep(cpDampedRotarySpring *spring, cpFloat dt)
 	cpBody *b = spring->constraint.b;
 	
 	cpFloat moment = a->i_inv + b->i_inv;
-	cpAssertSoft(moment != 0.0, "Unsolvable spring.");
-	spring->iSum = 1.0f/moment;
+	cpConstraintCheckSolvable(a, b, moment != 0.0);
+	spring->iSum = (moment != 0.0f ? 1.0f/moment : 0.0f);
 
 	spring->w_coef = 1.0f - cpfexp(-spring->damping*dt*moment);
 	spring->target_wrn = 0.0f;
@@ -77,11 +77,18 @@ getImpulse(cpDampedRotarySpring *spring)
 	return spring->jAcc;
 }
 
+static void
+resetCachedImpulse(cpDampedRotarySpring *spring)
+{
+	spring->jAcc = 0.0f;
+}
+
 static const cpConstraintClass klass = {
 	(cpConstraintPreStepImpl)preStep,
 	(cpConstraintApplyCachedImpulseImpl)applyCachedImpulse,
 	(cpConstraintApplyImpulseImpl)applyImpulse,
 	(cpConstraintGetImpulseImpl)getImpulse,
+	(cpConstraintResetCachedImpulseImpl)resetCachedImpulse,
 };
 
 cpDampedRotarySpring *
