@@ -95,6 +95,7 @@ cpArbiterThreadForBody(cpArbiter *arb, cpBody *body)
 }
 
 void cpArbiterUnthread(cpArbiter *arb);
+void cpArbiterUnthreadForBody(cpArbiter *arb, cpBody *body);
 
 void cpArbiterUpdate(cpArbiter *arb, struct cpCollisionInfo *info, cpSpace *space);
 void cpArbiterPreStep(cpArbiter *arb, cpFloat dt, cpFloat bias, cpFloat slop);

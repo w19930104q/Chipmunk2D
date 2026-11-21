@@ -51,6 +51,12 @@ cpArbiterUnthread(cpArbiter *arb)
 	unthreadHelper(arb, arb->body_b);
 }
 
+void
+cpArbiterUnthreadForBody(cpArbiter *arb, cpBody *body)
+{
+	unthreadHelper(arb, body);
+}
+
 cpBool cpArbiterIsFirstContact(const cpArbiter *arb)
 {
 	return arb->state == CP_ARBITER_STATE_FIRST_COLLISION;

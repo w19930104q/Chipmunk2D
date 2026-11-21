@@ -169,6 +169,20 @@ cpBodyActivateStatic(cpBody *body, cpShape *filter)
 static inline void
 cpBodyPushArbiter(cpBody *body, cpArbiter *arb)
 {
+	// Arbiters of sleeping bodies stay threaded in the contact graph while
+	// their bodies sleep. When such an arbiter is woken up and re-added to
+	// the contact graph, it can reach this point without passing through
+	// cpArbiterUnthread() first (for example when a sleeping body is activated
+	// from a callback while the space is locked, or when a cached arbiter is
+	// kept alive by a sleeping partner). Pushing it again without unthreading
+	// it first would thread it into the body's arbiter list twice, creating a
+	// cyclic list that hangs the component flood fill. Unthread it first to
+	// keep the contact graph consistent.
+	struct cpArbiterThread *thread = cpArbiterThreadForBody(arb, body);
+	if(thread->next != NULL || thread->prev != NULL || body->arbiterList == arb){
+		cpArbiterUnthreadForBody(arb, body);
+	}
+
 	cpAssertSoft(cpArbiterThreadForBody(arb, body)->next == NULL, "Internal Error: Dangling contact graph pointers detected. (A)");
 	cpAssertSoft(cpArbiterThreadForBody(arb, body)->prev == NULL, "Internal Error: Dangling contact graph pointers detected. (B)");
 	
